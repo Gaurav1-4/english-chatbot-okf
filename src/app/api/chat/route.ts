@@ -135,10 +135,10 @@ Follow these steps:
       content: responseMessage?.content || 'No response generated.'
     });
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error handling Groq API:', error);
     return NextResponse.json(
-      { error: 'An error occurred while generating a response.' },
+      { error: `An error occurred while generating a response. Details: ${error.message}` },
       { status: 500 }
     );
   }
