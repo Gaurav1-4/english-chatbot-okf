@@ -130,7 +130,7 @@ Follow these steps:
 
     return NextResponse.json({
       role: 'assistant',
-      content: responseMessage.content
+      content: responseMessage?.content || 'No response generated.'
     });
     
   } catch (error) {
