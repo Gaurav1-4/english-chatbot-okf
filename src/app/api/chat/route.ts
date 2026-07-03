@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 
+export const maxDuration = 60; // Set Vercel timeout to 60 seconds
+
 // Initialize Groq using environment variable
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY || '',
