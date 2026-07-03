@@ -1,85 +1,143 @@
-import { GoogleGenAI } from '@google/genai';
+import { NextResponse } from 'next/server';
+import Groq from 'groq-sdk';
+import fs from 'fs';
+import path from 'path';
+import matter from 'gray-matter';
 
-const apiKey = process.env.GEMINI_API_KEY;
-const fileUri = process.env.BOOK_FILE_URI;
+// Initialize Groq using environment variable
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY || '',
+});
+
+const okfDir = path.join(process.cwd(), 'okf-bundle');
+
+// Tool functions
+function readOkfIndex() {
+  const indexPath = path.join(okfDir, 'index.md');
+  if (!fs.existsSync(indexPath)) {
+    return 'Index not found. Knowledge base might be missing.';
+  }
+  const fileContent = fs.readFileSync(indexPath, 'utf8');
+  // Only return the markdown part, we can parse frontmatter if needed
+  const parsed = matter(fileContent);
+  return parsed.content;
+}
+
+function readOkfSection(fileName: string) {
+  // Ensure we don't traverse out of the directory
+  const safeFileName = path.basename(fileName);
+  const sectionPath = path.join(okfDir, safeFileName);
+  
+  if (!fs.existsSync(sectionPath)) {
+    return `Section ${safeFileName} not found.`;
+  }
+  
+  const fileContent = fs.readFileSync(sectionPath, 'utf8');
+  const parsed = matter(fileContent);
+  return parsed.content;
+}
 
 export async function POST(req: Request) {
-    if (!apiKey) {
-        return new Response(JSON.stringify({ error: "GEMINI_API_KEY is not set in environment variables." }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
-    }
+  try {
+    const { messages } = await req.json();
 
-    if (!fileUri) {
-        return new Response(JSON.stringify({ error: "BOOK_FILE_URI is not set in environment variables. Please upload the PDF first using the provided script." }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
-    }
+    const systemMessage = {
+      role: 'system',
+      content: `You are an expert AI tutor for the Class 10th English Book. 
+Your knowledge base is stored in the Open Knowledge Format (OKF). 
+You MUST use your tools to retrieve information from the book before answering any user question about the book content.
+Follow these steps:
+1. Always call 'readOkfIndex' first to see the list of available sections (unless you already know).
+2. Call 'readOkfSection' passing the filename (e.g. 'section_5.md') to read the specific content.
+3. Answer the user's question accurately based ONLY on the retrieved text. Do not make up information.
+`
+    };
 
-    try {
-        const ai = new GoogleGenAI({ apiKey: apiKey });
-        const { messages } = await req.json();
+    const conversation = [systemMessage, ...messages];
 
-        // Extract the latest user message
-        const latestMessage = messages[messages.length - 1].content;
-        
-        // Setup conversation history for context (optional, but good for follow-ups)
-        const contents = [];
-        
-        // Add previous messages (excluding the last one which we handle below)
-        for (let i = 0; i < messages.length - 1; i++) {
-            const msg = messages[i];
-            contents.push({
-                role: msg.role === 'user' ? 'user' : 'model',
-                parts: [{ text: msg.content }]
-            });
-        }
-        
-        // Add the current message with the file
-        // We include the file in the latest user request.
-        contents.push({
-            role: 'user',
-            parts: [
-                {
-                    fileData: {
-                        fileUri: fileUri,
-                        mimeType: 'application/pdf'
-                    }
+    let responseMessage;
+    let toolCalls;
+
+    // We do a small agent loop to handle tool calls
+    for (let i = 0; i < 5; i++) {
+      const completion = await groq.chat.completions.create({
+        messages: conversation,
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.2,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'readOkfIndex',
+              description: 'Reads the root index of the English book OKF bundle to list available sections.',
+              parameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'readOkfSection',
+              description: 'Reads a specific section markdown file from the OKF bundle.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  fileName: {
+                    type: 'string',
+                    description: 'The filename of the section, e.g., section_1.md'
+                  }
                 },
-                { text: latestMessage }
-            ]
-        });
+                required: ['fileName'],
+              },
+            },
+          }
+        ],
+        tool_choice: 'auto'
+      });
 
-        const systemInstruction = `You are an expert teacher and an authoritative chatbot for this exact Class 10th English Book (provided as a PDF file).
+      responseMessage = completion.choices[0].message;
+      toolCalls = responseMessage.tool_calls;
+
+      if (toolCalls) {
+        conversation.push(responseMessage); // append assistant tool call
         
-        CRITICAL RULES:
-        1. You have COMPLETE information about this book.
-        2. You must answer all questions, provide chapter summaries, clear doubts, and teach based STRICTLY on the contents of this book.
-        3. Do NOT make up information or bring in outside knowledge that contradicts or is not found in the book.
-        4. When a user asks you to "teach a chapter", break it down into easy-to-understand sections, provide the summary, discuss main characters or themes, and list important questions from the chapter.
-        5. Always be encouraging, helpful, and clear, acting like a friendly tutor.`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro',
-            contents: contents,
-            config: {
-                systemInstruction: systemInstruction,
-                temperature: 0.2, // Low temperature for factual consistency with the book
-            }
-        });
-
-        return new Response(JSON.stringify({ text: response.text }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-        });
-
-    } catch (error) {
-        console.error("Error generating content:", error);
-        return new Response(JSON.stringify({ error: "Failed to generate response." }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        for (const toolCall of toolCalls) {
+          const functionName = toolCall.function.name;
+          const functionArgs = JSON.parse(toolCall.function.arguments);
+          let functionResult = '';
+          
+          if (functionName === 'readOkfIndex') {
+            functionResult = readOkfIndex();
+          } else if (functionName === 'readOkfSection') {
+            functionResult = readOkfSection(functionArgs.fileName);
+          }
+          
+          conversation.push({
+            tool_call_id: toolCall.id,
+            role: 'tool',
+            name: functionName,
+            content: functionResult,
+          });
+        }
+      } else {
+        // No more tool calls, break the loop
+        break;
+      }
     }
+
+    return NextResponse.json({
+      role: 'assistant',
+      content: responseMessage.content
+    });
+    
+  } catch (error) {
+    console.error('Error handling Groq API:', error);
+    return NextResponse.json(
+      { error: 'An error occurred while generating a response.' },
+      { status: 500 }
+    );
+  }
 }

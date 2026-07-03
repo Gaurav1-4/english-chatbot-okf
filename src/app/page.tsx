@@ -1,65 +1,211 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import styles from './chat.module.css';
+import { Plus, Clock, ChevronDown, ArrowUp, Edit3, GraduationCap, Code, Home, Flower2 } from 'lucide-react';
+
+type Message = {
+  role: 'user' | 'model';
+  content: string;
+};
+
+export default function App() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
+
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    // Auto-resize
+    e.target.style.height = 'auto';
+    e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as any);
+    }
+  };
+
+  const submitMessage = async (text: string) => {
+    if (!text.trim() || isLoading) return;
+
+    setError(null);
+    const newMessages: Message[] = [...messages, { role: 'user', content: text }];
+    setMessages(newMessages);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: newMessages }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Something went wrong');
+      }
+
+      setMessages([...newMessages, { role: 'model', content: data.text }]);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitMessage(input);
+    setInput('');
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+    }
+  };
+
+  const renderInputBox = () => (
+    <div className={styles.inputContainer}>
+      <textarea
+        ref={textareaRef}
+        value={input}
+        onChange={handleInput}
+        onKeyDown={handleKeyDown}
+        placeholder="How can I help you today?"
+        className={styles.textarea}
+        disabled={isLoading}
+        rows={1}
+      />
+      <div className={styles.inputBottomRow}>
+        <div className={styles.leftIcons}>
+          <button className={styles.iconButton} type="button" title="Upload file (not active)"><Plus size={18} /></button>
+          <button className={styles.iconButton} type="button" title="Chat history"><Clock size={18} /></button>
+        </div>
+        <div className={styles.rightControls}>
+          <div className={styles.modelSelect}>
+            Book Tutor <ChevronDown size={16} />
+          </div>
+          <button 
+            type="submit" 
+            onClick={handleSubmit}
+            className={styles.sendButton} 
+            disabled={isLoading || !input.trim()}
+            title="Send Message"
+          >
+            <ArrowUp size={18} strokeWidth={2.5} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (messages.length === 0) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.landing}>
+          <div className={styles.logo}>
+            <Flower2 size={48} strokeWidth={1.5} />
+          </div>
+          <h1 className={styles.greeting}>
+            Good morning, <span className={styles.name}>Saify<span className={styles.underline}></span></span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+          
+          {error && <div style={{ color: 'red', marginBottom: '1rem' }}>{error}</div>}
+          
+          <form style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+            {renderInputBox()}
+          </form>
+          
+          <div className={styles.disclaimer}>
+            AI can make mistakes. Please check important information.
+          </div>
+          
+          <div className={styles.suggestions}>
+            <button type="button" className={styles.suggestionPill} onClick={() => submitMessage("Can you summarize the first chapter?")}>
+              <Edit3 size={16} /> Write
+            </button>
+            <button type="button" className={styles.suggestionPill} onClick={() => submitMessage("Teach me an important concept from the book.")}>
+              <GraduationCap size={16} /> Learn
+            </button>
+            <button type="button" className={styles.suggestionPill} onClick={() => submitMessage("What are the important questions for the exam?")}>
+              <Code size={16} /> Code
+            </button>
+            <button type="button" className={styles.suggestionPill} onClick={() => submitMessage("Explain the main theme of the story.")}>
+              <Home size={16} /> Life stuff
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.container}>
+      <header className={styles.chatHeader}>
+        <div className={styles.headerLogo}>
+          <Flower2 size={24} color="#d97757" />
+          Book Tutor
         </div>
-      </main>
+      </header>
+
+      <div className={styles.chatHistory}>
+        {messages.map((msg, idx) => (
+          <div key={idx} className={styles.messageRow}>
+            <div className={styles.messageContent}>
+              {msg.role === 'model' && (
+                <div className={styles.modelAvatar}>
+                  <Flower2 size={20} />
+                </div>
+              )}
+              <div className={msg.role === 'user' ? styles.userContent : styles.modelContent}>
+                {msg.role === 'user' ? (
+                  msg.content
+                ) : (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        {isLoading && (
+          <div className={styles.messageRow}>
+            <div className={styles.messageContent}>
+              <div className={styles.modelAvatar}>
+                <Flower2 size={20} />
+              </div>
+              <div className={styles.modelContent} style={{ display: 'flex', alignItems: 'center' }}>
+                <span style={{ fontStyle: 'italic', color: '#a1a1aa' }}>Searching Knowledge Base (OKF)...</span>
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={chatEndRef} />
+      </div>
+
+      <div className={styles.inputFooter}>
+        {error && <div style={{ color: 'red', marginBottom: '1rem' }}>{error}</div>}
+        <div className={styles.chatInputContainer}>
+          {renderInputBox()}
+        </div>
+        <div className={styles.disclaimer}>
+            AI can make mistakes. Please check important information.
+        </div>
+      </div>
     </div>
   );
 }
