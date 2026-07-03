@@ -481,6 +481,7 @@ export default function App() {
         <div className={styles.modalOverlay}>
           <div className={styles.modalContent}>
             <h2 className={styles.modalTitle}>{isSignUp ? 'Create Account' : 'Welcome Back'}</h2>
+            {error && <div style={{ color: '#ef4444', backgroundColor: '#fef2f2', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem', border: '1px solid #f87171' }}>{error}</div>}
             <form onSubmit={handleAuth} className={styles.authForm}>
               <input 
                 type="email" 
