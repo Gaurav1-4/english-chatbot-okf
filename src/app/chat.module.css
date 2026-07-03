@@ -112,12 +112,32 @@
   justify-content: center;
   padding: 4px;
   border-radius: 4px;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .iconButton:hover {
   background: #f4f4f5;
   color: #52525b;
+}
+
+.recordingPulse {
+  animation: pulse 1.5s infinite;
+  color: #ef4444 !important;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
 }
 
 .rightControls {
@@ -211,6 +231,31 @@
   color: #3f3f46;
   font-weight: 600;
   font-size: 1.1rem;
+}
+
+.headerControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.muteButton {
+  background: transparent;
+  border: none;
+  color: #71717a;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.muteButton:hover {
+  background: #f4f4f5;
+  color: #3f3f46;
 }
 
 .chatHistory {

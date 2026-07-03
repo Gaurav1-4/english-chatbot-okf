@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
-import { Plus, Clock, ChevronDown, ArrowUp, Edit3, GraduationCap, Code, Home, Flower2, MessageSquare, LogOut } from 'lucide-react';
+import { Plus, Clock, ChevronDown, ArrowUp, Edit3, GraduationCap, Code, Home, Flower2, MessageSquare, LogOut, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 
 type Message = {
@@ -16,6 +16,14 @@ type ChatHistory = {
   title: string;
   created_at: string;
 };
+
+// Add TypeScript declarations for Web Speech API
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -33,6 +41,11 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   
+  // Voice Bot State
+  const [isRecording, setIsRecording] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -47,6 +60,15 @@ export default function App() {
     });
 
     return () => subscription.unsubscribe();
+  }, [supabase.auth]);
+
+  // Ensure TTS voices are loaded
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = () => {
+            window.speechSynthesis.getVoices();
+        };
+    }
   }, []);
 
   // Fetch Chats when user changes
@@ -129,12 +151,84 @@ export default function App() {
     }
   };
 
+  // ---------------- Voice Bot Methods ----------------
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(transcript);
+      // Auto-send the transcribed voice message
+      submitMessage(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
+
+  const speak = (text: string) => {
+    if (isMuted || !window.speechSynthesis) return;
+
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    // Strip markdown characters before speaking
+    const cleanText = text.replace(/[*#_`\[\]]/g, '').trim();
+    
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    
+    // Prioritize Microsoft Edge Natural voices, then default English
+    const voices = window.speechSynthesis.getVoices();
+    let selectedVoice = voices.find(v => v.name.includes('Microsoft') && v.name.includes('Online (Natural)'));
+    
+    if (!selectedVoice) {
+      selectedVoice = voices.find(v => v.lang.startsWith('en-US')) || voices[0];
+    }
+    
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+    
+    utterance.rate = 1.0;
+    window.speechSynthesis.speak(utterance);
+  };
+  // ---------------------------------------------------
+
   const submitMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
+
+    // Stop speaking if user sends a new message
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
 
     setError(null);
     const newMessages: Message[] = [...messages, { role: 'user', content: text }];
     setMessages(newMessages);
+    setInput('');
     setIsLoading(true);
     
     let activeChatId = currentChatId;
@@ -176,6 +270,9 @@ export default function App() {
       const modelMessage = data.content || data.text; // Support both structures
       setMessages([...newMessages, { role: 'model', content: modelMessage }]);
 
+      // Speak the response
+      speak(modelMessage);
+
       // 4. Save model message
       if (user && activeChatId) {
         await supabase.from('messages').insert({ chat_id: activeChatId, role: 'model', content: modelMessage });
@@ -191,7 +288,6 @@ export default function App() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     submitMessage(input);
-    setInput('');
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
     }
@@ -204,7 +300,7 @@ export default function App() {
         value={input}
         onChange={handleInput}
         onKeyDown={handleKeyDown}
-        placeholder="How can I help you today?"
+        placeholder={isRecording ? "Listening..." : "How can I help you today?"}
         className={styles.textarea}
         disabled={isLoading}
         rows={1}
@@ -217,6 +313,16 @@ export default function App() {
           <div className={styles.modelSelect}>
             Book Tutor <ChevronDown size={16} />
           </div>
+          
+          <button 
+            type="button" 
+            onClick={toggleRecording}
+            className={`${styles.iconButton} ${isRecording ? styles.recordingPulse : ''}`} 
+            title={isRecording ? "Stop Recording" : "Voice Input"}
+          >
+            {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
+          </button>
+
           <button 
             type="submit" 
             onClick={handleSubmit}
@@ -307,6 +413,19 @@ export default function App() {
               <div className={styles.headerLogo}>
                 <Flower2 size={24} color="#d97757" />
                 Book Tutor
+              </div>
+              <div className={styles.headerControls}>
+                <button 
+                  className={styles.muteButton} 
+                  onClick={() => {
+                    setIsMuted(!isMuted);
+                    if (!isMuted && window.speechSynthesis) window.speechSynthesis.cancel();
+                  }}
+                  title={isMuted ? "Unmute Bot Voice" : "Mute Bot Voice"}
+                >
+                  {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                  {isMuted ? "Voice Off" : "Voice On"}
+                </button>
               </div>
             </header>
 
